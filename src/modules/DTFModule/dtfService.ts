@@ -140,15 +140,70 @@ export class DTFService {
   }
 
   async publishDraft(telegramId: number, username: string, draftId: string): Promise<boolean> {
-    // Здесь реализуйте логику публикации черновика
-    // Например:
     const browser = await this.getBrowser(telegramId, username);
     const page = await browser.newPage();
+    let retries = 0;
+    const maxRetries = 3;
+
     try {
-      // Логика публикации черновика
-      return true;
-    } catch (error) {
-      console.error("Ошибка при публикации черновика:", error);
+      while (retries < maxRetries) {
+        try {
+          console.log(`Попытка публикации ${retries + 1}/${maxRetries}`);
+          console.log(`Переход к черновику с ID ${draftId}...`);
+          await page.goto(`https://dtf.ru/drafts?modal=editor&action=edit&id=${draftId}`, { waitUntil: 'domcontentloaded', timeout: 60000 });
+          
+          console.log('Ожидание загрузки редактора...');
+          await page.waitForSelector('.editor', { visible: true, timeout: 10000 });
+          
+          console.log('Поиск кнопки публикации...');
+          await page.waitForSelector('.editor-control-bar__controls button, .editor-control-bar__controls .button', { visible: true, timeout: 10000 });
+          
+          page.on('dialog', async (dialog) => {
+            console.log('Обнаружено диалоговое окно:', dialog.message());
+            await dialog.accept();
+          });
+
+          console.log('Нажатие кнопки публикации...');
+          await page.evaluate(() => {
+            const publishButton = document.querySelector('.editor-control-bar__controls button, .editor-control-bar__controls .button');
+            if (publishButton) {
+              (publishButton as HTMLElement).click();
+            }
+          });
+          
+          console.log('Ожидание подтверждения публикации или ошибки...');
+          await Promise.race([
+            page.waitForNavigation({ timeout: 30000 }),
+            page.waitForSelector('.alert__text', { visible: true, timeout: 30000 })
+          ]);
+          
+          const errorElement = await page.$('.alert__text');
+          if (errorElement) {
+            const errorText = await errorElement.evaluate(el => el.textContent);
+            if (errorText && errorText.includes('Ошибка при сохранении поста')) {
+              console.log('Обнаружена ошибка при сохранении поста. Перезагрузка страницы...');
+              await page.reload({ waitUntil: 'networkidle0' });
+              retries++;
+              continue;
+            }
+          }
+          
+          const currentUrl = page.url();
+          if (currentUrl.includes('drafts?modal=editor')) {
+            throw new Error('Редирект после публикации не произошел');
+          }
+          
+          console.log('Черновик успешно опубликован');
+          return true;
+        } catch (error) {
+          console.error(`Ошибка при публикации черновика (попытка ${retries + 1}/${maxRetries}):`, error);
+          retries++;
+          if (retries >= maxRetries) {
+            return false;
+          }
+          await new Promise(resolve => setTimeout(resolve, 5000)); // Ждем 5 секунд перед повторной попыткой
+        }
+      }
       return false;
     } finally {
       await page.close();
