@@ -21,9 +21,9 @@ bot.command("drafts", async (ctx) => {
   console.log("Команда /drafts вызвана");
   if (!checkAuth(ctx)) return;
 
-  if (ctx.from) {
+  if (ctx.from && ctx.chat) {
     const loadingMessage = await ctx.reply("Загрузка черновиков...");
-    console.log("Пользователь авторизован, получаем черновики");
+    console.log("Пользователь авторизован, получем черновики");
     const session = userSessions.get(ctx.from.id)!;
     try {
       const drafts = await dtfService.getDrafts(ctx.from.id, session.dtfUsername!);
@@ -36,7 +36,7 @@ bot.command("drafts", async (ctx) => {
           message += `   Тема: ${draft.topic || 'Не указана'}\n`;
           message += `   ID: ${draft.id}\n\n`;
         });
-        message += "Для публикации черновика используйте команду /publish <номер черновика>";
+        message += "Для публикации черновика используйте команду /publish <ID черновика>";
         await ctx.api.editMessageText(ctx.chat.id, loadingMessage.message_id, message);
       } else {
         await ctx.api.editMessageText(ctx.chat.id, loadingMessage.message_id, "У вас нет черновиков.");
@@ -52,24 +52,22 @@ bot.command("publish", async (ctx) => {
   console.log("Команда /publish вызвана");
   if (!checkAuth(ctx)) return;
 
-  const draftNumber = parseInt(ctx.match);
-  if (isNaN(draftNumber)) {
-    return ctx.reply("Пожалуйста, укажите номер черновика для публикации.");
+  const draftId = ctx.match;
+  if (!draftId) {
+    return ctx.reply("Пожалуйста, укажите ID черновика для публикации.");
   }
 
   if (ctx.from) {
     const session = userSessions.get(ctx.from.id)!;
     try {
-      const drafts = await dtfService.getDrafts(ctx.from.id, session.dtfUsername!);
-      if (drafts && draftNumber >= 1 && draftNumber <= drafts.length) {
-        const draft = drafts[draftNumber - 1];
-        // Здесь нужно реализовать метод publishDraft в DTFService
-        await dtfService.publishDraft(ctx.from.id, session.dtfUsername!, draft.id!);
-        await ctx.reply(`Черновик "${draft.title || 'Без названия'}" успешно опубликован.`);
+      const result = await dtfService.publishDraft(ctx.from.id, session.dtfUsername!, draftId);
+      if (result) {
+        await ctx.reply(`Черновик с ID ${draftId} успешно опубликован.`);
       } else {
-        await ctx.reply("Указан неверный номер черновика.");
+        await ctx.reply("Не удалось опубликовать черновик. Пожалуйста, попробуйте еще раз.");
       }
     } catch (error) {
+      console.error("Ошибка при публикации черновика:", error);
       await ctx.reply(`Ошибка при публикации черновика: ${error instanceof Error ? error.message : 'Неизвестная ошибка'}`);
     }
   }
@@ -93,7 +91,7 @@ bot.on("message:text", async (ctx) => {
       if (isValidEmail(ctx.message.text)) {
         session.dtfUsername = ctx.message.text;
         session.state = "AWAITING_PASSWORD";
-        await ctx.reply("Теперь введите ваш пароль:");
+        await ctx.reply("Теперь введите ваш ароль:");
       } else {
         await ctx.reply("Пожалуйста, введите корректный email адрес.");
       }
